@@ -28,6 +28,21 @@ field. CargoSense automates that:
    documents, uncertain categories) goes to a human review queue with the reason and
    evidence. The reviewer's decision updates the report.
 
+## The web app
+
+- **Dashboard**: the provided inbox at a glance, with charts (emails by category, document
+  check outcomes, mismatches by field, open review cases by reason) that can be shown or
+  hidden, and a first-visit tour.
+- **Inbox**: every email, searchable, filterable and sortable; each one explains *why* it
+  was classified that way, and document checks show the SI and BL side by side.
+- **Human Review**: escalated cases with their evidence; confirm, correct or reclassify.
+  Several reviewers can work at once.
+- **Upload & Check**: run the system on your own emails and documents (one email, or a
+  whole inbox as a zip, `.json` or `.eml` files), with live progress and a downloadable
+  `submission.json`.
+- Tasks keep running while you move between pages, and every step is shown live (rules,
+  OCR, AI, AI rate limits with a countdown).
+
 ## How AI is used
 
 - **Classification:** rules decide the clear cases; an LLM decides ambiguous emails.

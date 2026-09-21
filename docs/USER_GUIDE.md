@@ -25,6 +25,17 @@ review), your latest uploads, and shortcuts to review them or see them in the In
 uploads are kept **separate** from the main numbers on purpose: those describe the
 provided inbox and match the official submission.
 
+Below the headline numbers, **charts** show the emails by category, the outcome of the
+document checks (no mismatch, mismatch, escalated), which fields most often disagree, and
+the open review cases by reason. Click a category bar to open those emails, or a reason
+bar to go to Human Review. Hide the charts you don't need with the ✕ on each, or with
+*Edit charts*; the choice is remembered in your browser. The escalated count can be
+higher than *Human Review*: cases acknowledged with "request new documents" stay escalated
+but are no longer waiting for a person.
+
+*Run pipeline* has a short **cooldown** between runs. While it lasts, a banner counts down
+to the next allowed run and the buttons are locked.
+
 ### Inbox
 Every email with its **category**, **status**, how it was verified, and its attachment
 types. Search by subject, sender or email id; filter by category (each filter shows how
@@ -34,6 +45,11 @@ many emails it holds), or by **Uploaded** to see only what you added.
 its category (for example "An SI and a BL are attached and the email asks for them to be
 checked") and whether rules or the AI decided it, and shows what the sender wrote. Document
 comparison requests also show the SI ↔ BL comparison below.
+
+**Sorting:** click a column heading (Email, Category, Status, Verified by, Documents) to
+sort by it, click again to reverse, and a third time to go back to the default order. On
+small screens use the *Sort* menu instead. Sorting only changes the order: filters, search
+and counts stay the same.
 
 ### SI ↔ BL comparison
 The 7 fields side by side: **shipper, consignee, notify party, port of loading, port of
@@ -63,6 +79,13 @@ warnings), and the SI/BL values it could read. You can:
 The decision updates the dashboard, the report and the final results immediately, and
 is recorded with the reviewer's name. When you've uploaded emails, the queue is split into
 **Provided inbox** and **Your uploads**, and uploaded cases show your own email ids.
+
+The **Sort** menu at the top of the list orders the cases by proposal (the default: the
+ones with a ready proposal first), by email id, or by reason (grouped under each reason).
+
+Several people can review at once: the queue refreshes every 15 seconds. If someone else
+resolves the case you have open, a notice says so and offers the next open case. If you
+save anyway, your decision replaces theirs.
 
 ### Upload & Check
 Try it with your own emails and documents. Two tabs:

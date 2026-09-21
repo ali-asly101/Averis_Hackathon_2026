@@ -3,10 +3,12 @@
 The judges test through a public link. The whole app (UI + API) runs as **one
 container**, so there is one thing to deploy and one link to submit.
 
-## Recommended: Hugging Face Spaces (free, no credit card)
+## Recommended: Hugging Face Spaces
 
-Free CPU Spaces have plenty of RAM for the OCR models, give you a public HTTPS
-URL, and build straight from the included `Dockerfile`.
+Hosting a Docker app on Hugging Face Spaces needs a **PRO subscription** (about US$9 a
+month); the free tier only hosts static pages. In return you get plenty of memory for OCR
+(it needs about 690 MB), a public HTTPS link, and a build straight from the included
+`Dockerfile`.
 
 ### 1. One-time setup (~5 min)
 
@@ -57,6 +59,30 @@ That's the link for the submission form.
 
 To update the site later, run `python deploy/deploy_hf.py` again.
 
+### 4. Updating the site
+
+Any change (code, docs, settings in `.env`) goes live the same way:
+
+```bash
+python deploy/deploy_hf.py
+```
+
+The web UI is built inside the image, so there is no separate frontend build step. Wait
+for **Running** on the Space page, then hard-refresh the site (Cmd+Shift+R / Ctrl+Shift+R).
+
+### 5. Before judging
+
+- **Upload limits** are counted per internet connection, so judges on one shared Wi-Fi
+  share them. If they may test from one place, add a Space **variable**
+  `SDOC_BATCHES_PER_HOUR` = `40` (Settings → Variables and secrets). The deploy script
+  does not copy this one from `.env`.
+- **Deploy once more** at the end: a deploy is a clean slate (no test uploads, the
+  original 20 review cases).
+- **Check it cold** in a private/incognito window: the tour appears, the dashboard shows
+  520 emails, and the sidebar says *AI ready*.
+- **Then leave it alone** during judging. A redeploy or a settings change restarts the
+  container, which clears judges' uploads and interrupts running batches.
+
 ## Guardrails (already on in the Dockerfile)
 
 Public link = anyone can use it on **your** AI key, so:
@@ -70,16 +96,25 @@ Public link = anyone can use it on **your** AI key, so:
 | `SDOC_MAX_UPLOAD_MB` | 10 | max size per uploaded file |
 | `SDOC_MAX_BATCH_MB` / `SDOC_MAX_BATCH_EMAILS` | 60 / 1000 | whole-inbox upload limits (one batch runs at a time) |
 | `SDOC_BATCHES_PER_HOUR` | 6 | whole-inbox uploads per visitor IP per hour |
-| `SDOC_ADMIN_TOKEN` | (off) | set it as a Space secret to make full re-runs need a token |
+| `SDOC_ADMIN_TOKEN` | (off) | set it as a Space secret to make full re-runs need a token (see below) |
 
-OCR and AI results are cached, so re-runs after the first cost no AI quota.
+OCR and AI results are cached, so re-runs after the first cost no AI quota. During the
+cooldown the dashboard shows a countdown and locks the run buttons.
+
+**Admin token.** Only *Run pipeline*, *Retry failures* and *Delete all uploads* ever ask
+for it; browsing, uploading and reviewing never do. The deploy script copies
+`SDOC_ADMIN_TOKEN` from your `.env` to the Space on **every** deploy, so to switch it off,
+delete the Space secret **and** remove the line from `.env`.
 
 ## Good to know
 
-- **State resets when the container restarts** (free Spaces sleep after ~48 h without
-  visitors and on every redeploy). The inbox is re-processed automatically; reviewer
-  decisions and uploads from before the restart are gone. Fine for judging; persistent
-  storage is a later step.
+- **State resets when the container restarts** (every redeploy or settings change, and
+  when a Space wakes up after sleeping through a long period without visitors). The
+  provided inbox's results are built into the image, so the dashboard is back instantly;
+  reviewer decisions and uploads from before the restart are gone. Persistent storage is
+  a later step.
+- **Sleeping**: the first visit after a quiet period wakes the Space, which takes about a
+  minute. Open the site yourself shortly before judging.
 - **The Space repository is public** (code + the participant dataset, never the answer
   key). A private Space would not be reachable by the judges.
 - **Logs**: the Space page → *Logs* shows the server output (the settings banner,
@@ -99,5 +134,4 @@ docker run -p 7860:7860 -e LLM_API_KEY=gsk_... cargosense     # http://localhost
 
 On **Render / Railway / Cloud Run** the platform's `PORT` variable is picked up
 automatically; set `LLM_API_KEY` (and optionally `SDOC_ADMIN_TOKEN`) in the
-platform's environment/secret settings, never in the image. Note Render's free plan
-has 512 MB RAM, which is tight for the OCR engine.
+platform's environment/secret settings, never in the image. Render's free plan (512 MB RAM) is too small: OCR alone peaks around 690 MB.

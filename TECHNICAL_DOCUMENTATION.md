@@ -109,6 +109,20 @@ Contents: 1. Technical architecture · 2. Implementation details · 3. Challenge
   so an interrupted batch keeps what it finished and says so.
 - Failures are marked retryable; OCR and LLM results are cached by content hash.
 
+### Dashboard, sorting and several reviewers
+- **Charts** (category mix, check outcomes, mismatches by field, open cases by reason) are
+  plain SVG/CSS, no chart library, drawn from the data the dashboard already loads. They
+  cover the provided inbox only, like the headline numbers, and can be hidden per browser.
+- **Sorting** of the inbox (column headers, or a menu on small screens) and of the review
+  queue only reorders what is loaded; filters, counts and data are untouched. The review
+  queue always keeps the provided inbox and uploads in separate groups.
+- **Run cooldown**: the API reports the minimum gap between full runs and the seconds
+  left, so the dashboard shows a countdown and locks the run buttons instead of failing
+  with an error. Whether an admin token can bypass it is reported too (never the token).
+- **Several reviewers**: the dashboard and the review queue refresh every 15 seconds. If
+  another reviewer resolves the case you have open, a notice says so instead of switching
+  the case out from under you.
+
 ### Testing
 - Two suites (100+ checks) cover classification, every document format, OCR, extraction,
   comparison, uploads, deletion, batch recovery and live status.
@@ -131,6 +145,8 @@ Contents: 1. Technical architecture · 2. Implementation details · 3. Challenge
 | One slow check froze the web server for everyone | Checks run in worker threads |
 | Progress disappeared when changing pages | App-level task state, a task dock, reload and restart recovery |
 | An interrupted batch lost finished work | Save results before each slow email |
+| Several reviewers deciding the same queue | Periodic refresh, and a notice when your open case was resolved by someone else |
+| Users pressing Run during the cooldown got an error | The API reports the cooldown; the UI shows a countdown and locks the buttons |
 | Integrating work from several team members | One package with shared settings, tests as the contract between modules |
 
 ---
