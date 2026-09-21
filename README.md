@@ -1,178 +1,114 @@
-# SDOC — Shipping Document Verification
+# CargoSense: Shipping Document Verification
 
-Averis x Monash Hackathon 2026. From an email inbox to a discrepancy report:
+**From a shipping inbox to a verified Bill of Lading, automatically.**
 
-1. **Classify** every email: `BL_COMPARISON`, `SI_REQUEST`, `INVOICE_QUERY`, `GENERAL`, `SPAM`
-2. **Extract** the 7 fields from the Shipping Instruction (SI) and draft Bill of Lading (BL):
-   txt, PDF, Word, Excel, and scanned documents (OCR)
-3. **Compare** them and flag mismatches, showing SI and BL values side by side
-4. **Ask for help**: anything the system can't decide goes to a human review queue,
-   with the reason and the source evidence; the reviewer's decision updates the report
+Averis x Monash Hackathon 2026 · Team **AIght bet**
 
-**Using the website:** see [docs/USER_GUIDE.md](docs/USER_GUIDE.md) (pages, input formats,
-what the results mean, deleting, how it works).
-
-**Live site:** see [DEPLOY.md](DEPLOY.md). It deploys the UI + API as one container
-(Hugging Face Spaces, free), which is the link the judges use.
+| | |
+|---|---|
+| **Live prototype** | https://aliasly2005-cargosense.hf.space |
+| **Technical documentation** | [TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md) |
+| **User guide** | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) |
 
 ---
 
-## Quick start
+## What it does
 
-Needs **Python 3.10+**. Node.js 20+ is only needed for the web UI.
+A shipping operations inbox mixes document-check requests with new instructions,
+invoice questions, updates and spam. For every document-check request, someone has to
+compare the **Shipping Instruction (SI)** with the **draft Bill of Lading (BL)** field by
+field. CargoSense automates that:
 
-```bash
-# 1. (recommended) a virtual environment
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-source .venv/bin/activate       # macOS / Linux
+1. **Classify** every email: *BL Comparison*, *SI Request*, *Invoice Query*, *General*, *Spam*.
+2. **Extract** 7 fields from the SI and the BL (shipper, consignee, notify party, port of
+   loading, port of discharge, container count, gross weight in kg). Plain text, PDF,
+   Word, Excel and scanned documents are all supported.
+3. **Compare** them and list every mismatch with both values, or report
+   **"No mismatch detected."**
+4. **Ask for help**: anything it can't decide safely (scans, blanks, wrong or missing
+   documents, uncertain categories) goes to a human review queue with the reason and
+   evidence. The reviewer's decision updates the report.
 
-# 2. set everything up (creates .env, installs packages, builds the UI)
-python setup_project.py
+## How AI is used
 
-# 3. put your AI key in .env        LLM_API_KEY=gsk_...   (console.groq.com)
-#    and tell it where the data is  SDOC_DATA=data_v2     (see "Data" below)
+- **Classification:** rules decide the clear cases; an LLM decides ambiguous emails.
+- **Extraction:** a label-aware rule parser and an LLM both read every document and
+  cross-check each other. LLM values that don't appear in the document are rejected.
+- **Scanned documents:** OCR (RapidOCR), with a vision LLM when OCR can't read a page.
+- Works with any OpenAI-compatible LLM provider (Groq by default).
 
-# 4. check, run, score
-python -m sdoc check
-python -m sdoc run
-python -m sdoc score
-```
+## Cloud
 
-No AI key? It still runs: `python -m sdoc run --no-ai` uses the rule-based
-parser and OCR only.
+The UI and API run as **one Docker container on Hugging Face Spaces**. The provided
+inbox is processed while the image builds, so the site opens instantly. API keys are
+encrypted platform secrets; the answer key is never deployed.
 
-## Data
+## Results on the provided sample (520 emails)
 
-Two ways, exactly as in the use-case document. Set `SDOC_DATA` in `.env`:
-
-| Option | `.env` | Scoring |
-|---|---|---|
-| **Static bundle**: put the extracted data folder (with `inbox/` and `attachments/`) in the project root | `SDOC_DATA=data_v2` | `python -m sdoc score` if the folder has a `ground_truth.json` |
-| **Local server**: `docker compose up --build` in the organizers' package | `SDOC_DATA=http://localhost:8080` | `python -m sdoc run --submit` (their `POST /submit` scoreboard) |
-
-The data folder is git-ignored: never commit it (the organizer package
-contains the answer key).
-
-## Commands
-
-```bash
-python -m sdoc check                  # what's set up, what's missing (and how to fix it)
-python -m sdoc run                    # process the inbox -> output/
-python -m sdoc run --no-ai            #   ...without AI calls
-python -m sdoc run --retry            #   ...re-run only emails that failed (AI quota, network)
-python -m sdoc run --submit           #   ...and score on the organizers' server
-python -m sdoc score                  # score output/submission.json locally
-python -m sdoc review list            # the human review queue, from the terminal
-python -m sdoc review correct email_516 --si gross_weight_kg=230000 --by Ali
-python -m sdoc serve                  # web UI + API -> http://127.0.0.1:8000
-```
-
-Outputs in `output/`: `submission.json` (the self-evaluation format),
-`report.md` (readable report), `review_queue.json`, `results.json` (full detail),
-`final_submission.json` (with reviewers' decisions applied).
-
-## Web UI
-
-After `python setup_project.py` the UI is built, so `python -m sdoc serve`
-serves everything on one address. Click **Run pipeline** on the dashboard.
-
-Pages: **Dashboard**, **Inbox**, the **SI ↔ BL comparison**, **Human Review**, and
-**Upload & Check**:
-- **Whole inbox**: upload a `.zip` of an inbox (same layout as the dataset), email `.json`
-  files, or saved `.eml` emails with their attachments. It's processed in the background, and
-  you can download a `submission.json` keyed by your own email ids. There's a sample inbox to
-  download if you have no files.
-- **Single email**: paste an email and/or upload an SI and a BL (txt, PDF, Word, Excel or a
-  scanned image) and see the result immediately.
-
-To work on the UI with hot reload, run both:
-
-```bash
-python -m sdoc serve                  # terminal 1 - API on :8000
-cd frontend && npm run dev            # terminal 2 - UI on http://localhost:5173
-```
-
-## Configuration
-
-Everything is in **`.env`** (template: [`.env.example`](.env.example), every
-option is explained there). The main ones:
-
-| Variable | What it does |
+| Measure | Result |
 |---|---|
-| `LLM_API_KEY` | AI key (Groq by default). Empty = no AI |
-| `LLM_BASE_URL`, `LLM_MODEL`, `LLM_VISION_MODEL` | switch AI provider/model (any OpenAI-compatible API) |
-| `SDOC_DATA` | data folder or organizers' server URL |
-| `SDOC_OUT` | output folder (default `output`) |
-| `SDOC_EXTRACTION_MODE` | `ai` (default) / `auto` / `rules` |
-| `SDOC_OCR_POLICY` | `review` (scans go to a human, default) / `trust` |
-| `SDOC_API_PORT` | web port (default 8000) |
+| Emails fully correct (category, status, reason, defect fields) | 520 / 520 |
+| Edge cases escalated with the correct reason | 20 / 20 |
+| False alarms | 0 |
 
-Real environment variables override `.env` (that's how the cloud deploy will
-inject secrets).
+The rules were developed on this sample; unseen wording falls back to the LLM.
 
-## How it meets the brief
+---
 
-| Requirement | Where |
+## Quick start (local)
+
+Requires **Python 3.12** (OCR doesn't install on 3.13+) and **Node.js 18+**.
+
+```bash
+python setup_project.py        # creates .venv, installs everything, builds the UI
+cp .env.example .env           # then set LLM_API_KEY (Groq: console.groq.com) and SDOC_DATA
+python -m sdoc check           # checks your setup and says how to fix anything missing
+python -m sdoc serve           # UI + API on http://127.0.0.1:8000
+```
+
+The app runs without an AI key too (rules + OCR only).
+
+### Commands
+
+| Command | What it does |
 |---|---|
-| Classify 5 categories | `sdoc/classify.py`: rules first, AI for ambiguous emails |
-| Extract 7 fields, labels differ between SI and BL | `sdoc/label_matching.py`, `sdoc/document_reader.py` |
-| Compare, SI vs BL side by side, "No mismatch detected." | `sdoc/compare.py`, report + UI |
-| Human in the loop with context | `sdoc/review.py`, UI Review page |
-| PDF & Word attachments, tables, layouts | `sdoc/format_readers.py` + AI document analysis |
-| Scanned documents (OCR / vision) | `sdoc/ocr.py`, vision fallback in `sdoc/ai_extraction.py` |
-| Messier inputs: real discrepancy vs reading/formatting issue | formatting-insensitive exact comparison; OCR values never auto-trusted |
-| Unreadable / missing value → review with evidence; confirm or correct; update report | `review.py`, `final_submission.json`, `report.md` |
-| Failures visible, retries | per-email retryable flag, `run --retry`, on-disk cache |
+| `python -m sdoc check` | Diagnose the setup |
+| `python -m sdoc run` | Process the inbox into `output/` (`--no-ai`, `--retry`, `--submit`) |
+| `python -m sdoc score` | Score locally against a ground-truth file |
+| `python -m sdoc review list\|show\|confirm\|correct\|override\|reopen` | Human review from the command line |
+| `python -m sdoc serve` | Web UI + API |
+| `python deploy/deploy_hf.py` | Deploy to Hugging Face Spaces |
 
-## Project layout
-
-```
-sdoc/                  the Python package
-  config.py            every setting (reads .env)
-  llm.py               the one AI client
-  loader.py            organizers' data loader (unchanged)
-  classify.py          stage 1 - email category
-  email_utils.py       SI/BL attachment detection, email-body cleaning
-  format_readers.py    PDF / DOCX / XLSX -> text
-  ocr.py               scanned pages -> text
-  label_matching.py    rule-based field extraction
-  ai_extraction.py     AI document analysis (text + vision)
-  document_reader.py   any attachment -> one JSON document record
-  extraction.py        stage 2 - read the SI + BL of an email
-  compare.py           stage 3 - compare the 7 fields
-  review.py            human review decisions + report
-  pipeline.py          runs everything over the inbox
-  scoring.py           local scoring
-  uploads.py           Upload & Check storage + deleting (records, files, decisions)
-  batch.py             whole-inbox uploads: zip / .json / .eml parsing, freestyle records
-  api.py               web API for the UI
-  __main__.py          the `python -m sdoc ...` commands
-frontend/              React UI
-tests/                 python tests/test_classify.py, python tests/test_documents.py
-docs/                  use-case PDF, organizers' README + docker-compose
-deploy/deploy_hf.py    one-command deploy to Hugging Face Spaces
-Dockerfile             the production container (UI + API)
-setup_project.py       one-command setup
-```
-
-## Tests
+### Tests
 
 ```bash
 python tests/test_classify.py
 python tests/test_documents.py
 ```
 
-No API key needed: the AI is replaced by a fake client in tests.
+### Configuration
 
-## Troubleshooting
+All settings live in `.env` (see `.env.example`): the AI provider (`LLM_API_KEY`,
+`LLM_BASE_URL`, `LLM_MODEL`, `LLM_VISION_MODEL`), the data source (`SDOC_DATA`: a folder,
+or the organizers' server URL), extraction and OCR policies, and web limits.
 
-- **`python -m sdoc check` says data not reachable**: set `SDOC_DATA` in `.env`. A relative
-  path is relative to this project folder.
-- **Docker server shows `"emails": 0`**: move the organizers' package under your home folder
-  (Docker Desktop can't share `/tmp`), then `docker compose up --build` again.
-- **Port 8000 or 8080 already in use**: change `SDOC_API_PORT` in `.env`, or the host port in
-  the organizers' `docker-compose.yml`.
-- **Red squiggles in VS Code in `frontend/`**: run `npm install` in `frontend/`, then
-  *TypeScript: Restart TS Server*.
->>>>>>> cc5de92 ( file)
+## Project layout
+
+```
+sdoc/            Python package: classify, read documents, OCR, extract, compare,
+                 review, uploads, batch parsing, live activity, web API, CLI
+frontend/        React + TypeScript UI (Vite)
+tests/           test suites
+deploy/          one-command Hugging Face deployment
+docs/            user guide
+Dockerfile       the production container (UI + API)
+```
+
+## Team
+
+| Member | Role |
+|---|---|
+| [Alvaro] | Data extraction |
+| [Sachein] | Email classification |
+| [Ali] | Comparison, integration, deployment |
+| [Elsayed] | Business case | Frontend |
