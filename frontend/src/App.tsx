@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
+import cargoSenseLogo from "./assets/logo.png";
 import { batchSummary, useTasks } from "./tasks";
 import type { Task, TaskStore } from "./tasks";
 import {
@@ -465,14 +466,13 @@ function Sidebar({
 }) {
   return (
     <aside className="sidebar">
-      <div className="brand">
-        <div className="brand-icon">C</div>
-
-        <div>
-          <h1>CargoSense</h1>
-          <span>AI Document Verification</span>
-        </div>
-      </div>
+    <div className="brand">
+      <img
+        src={cargoSenseLogo}
+        alt="CargoSense"
+        className="brand-logo"
+      />
+    </div>
 
       <nav>
         <button
