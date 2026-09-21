@@ -1,0 +1,31 @@
+# secrets
+.env
+
+# data (the organizer bundle contains the answer key - never commit it)
+data/
+data_v2/
+*.zip
+
+# pipeline outputs + caches
+deploy_build/
+output/
+.sdoc_cache/
+*.tmp
+submission.json
+final_submission.json
+results.json
+review_queue.json
+review_decisions.json
+report.md
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

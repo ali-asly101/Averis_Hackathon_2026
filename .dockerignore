@@ -1,0 +1,15 @@
+# never ship secrets or the answer key
+.env
+**/ground_truth.json
+data_v2/
+# build junk
+**/node_modules
+frontend/dist
+**/__pycache__
+.venv
+venv
+output
+.sdoc_cache
+deploy_build
+*.zip
+.git
