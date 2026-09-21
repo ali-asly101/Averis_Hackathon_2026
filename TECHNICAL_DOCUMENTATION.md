@@ -1,6 +1,6 @@
 # CargoSense: Technical Documentation
 
-Averis x Monash Hackathon 2026 · Live: https://aliasly2005-cargosense.hf.space
+Averis x Monash Hackathon 2026 
 
 Contents: 1. Technical architecture · 2. Implementation details · 3. Challenges faced ·
 4. Future roadmap

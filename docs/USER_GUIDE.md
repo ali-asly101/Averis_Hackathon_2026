@@ -5,7 +5,6 @@ document-check requests compares the **Shipping Instruction (SI)** with the
 **draft Bill of Lading (BL)**, flagging exactly which of the 7 fields differ.
 Anything it can't decide safely goes to a person, with the reason and the evidence.
 
-**Live site:** `https://aliasly2005-cargosense.hf.space`
 
 ---
 

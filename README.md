@@ -6,7 +6,6 @@ Averis x Monash Hackathon 2026 · Team **AIght bet**
 
 | | |
 |---|---|
-| **Live prototype** | https://aliasly2005-cargosense.hf.space |
 | **Technical documentation** | [TECHNICAL_DOCUMENTATION.md](TECHNICAL_DOCUMENTATION.md) |
 | **User guide** | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) |
 
