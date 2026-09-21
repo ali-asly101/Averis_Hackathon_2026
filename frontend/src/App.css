@@ -2294,3 +2294,457 @@ div.inbox-row:focus-visible,
   font-weight: 500;
   opacity: 0.8;
 }
+
+/* ------------------------------------------------------------------ */
+/* Run cooldown banner                                                 */
+/* ------------------------------------------------------------------ */
+.cooldown-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 16px 20px;
+  border-color: #fedf89;
+  background: #fffcf5;
+}
+
+.cooldown-icon {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #fef0c7;
+  font-size: 18px;
+}
+
+.cooldown-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cooldown-text strong {
+  color: #93370d;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cooldown-text span {
+  color: #667085;
+  font-size: 13px;
+}
+
+.cooldown-progress {
+  height: 5px;
+  margin-top: 6px;
+  background: #fef0c7;
+}
+
+.cooldown-progress .progress-bar {
+  background: #f79009;
+  transition: width 1s linear;
+}
+
+.secondary-button:disabled {
+  color: #98a2b3;
+  background: #f9fafb;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dashboard charts                                                    */
+/* ------------------------------------------------------------------ */
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  margin-bottom: 22px;
+}
+
+.chart-panel h3 {
+  margin-bottom: 18px;
+}
+
+.chart-empty {
+  margin: 0;
+  padding: 24px 0;
+  color: #98a2b3;
+  font-size: 13px;
+  text-align: center;
+}
+
+/* colours: same palette as the status and category badges */
+.tone-verified { --tone: #12b76a; }
+.tone-mismatch { --tone: #e8590c; }
+.tone-review { --tone: #f79009; }
+.tone-cat-bl-comparison { --tone: #444ce7; }
+.tone-cat-si-request { --tone: #7a5af8; }
+.tone-cat-invoice-query { --tone: #ef6820; }
+.tone-cat-general { --tone: #98a2b3; }
+.tone-cat-spam { --tone: #d92d20; }
+
+.bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 38%) minmax(0, 1fr) 44px;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.bar-row-link {
+  cursor: pointer;
+}
+
+.bar-row-link:hover {
+  background: #f8fafc;
+}
+
+.bar-row-link:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 1px;
+}
+
+.bar-label {
+  overflow: hidden;
+  color: #475467;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f2f4f7;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--tone, #4f7cff);
+  transition: width 0.4s ease;
+}
+
+.bar-value {
+  color: #172033;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.donut-chart {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.donut {
+  flex: none;
+  width: 150px;
+  height: 150px;
+}
+
+.donut-track,
+.donut-slice {
+  fill: none;
+  stroke-width: 14;
+}
+
+.donut-track {
+  stroke: #f2f4f7;
+}
+
+.donut-slice {
+  stroke: var(--tone, #4f7cff);
+  transition: stroke-dasharray 0.4s ease, stroke-dashoffset 0.4s ease;
+}
+
+.donut-total {
+  fill: #172033;
+  font-size: 18px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.donut-caption {
+  fill: #667085;
+  font-size: 8px;
+  text-anchor: middle;
+}
+
+.chart-legend {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chart-legend li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto 40px;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--tone, #4f7cff);
+}
+
+.legend-label {
+  color: #475467;
+}
+
+.chart-legend small {
+  color: #98a2b3;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1100px) {
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .donut-chart {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .donut {
+    align-self: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar-fill,
+  .donut-slice,
+  .cooldown-progress .progress-bar {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Sorting: inbox column headers, sort selects                         */
+/* ------------------------------------------------------------------ */
+.sort-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.sort-header:hover,
+.sort-header.sort-active {
+  color: #263b64;
+}
+
+.sort-header:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.sort-arrow {
+  font-size: 9px;
+  opacity: 0.45;
+}
+
+.sort-active .sort-arrow {
+  opacity: 1;
+}
+
+.sort-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.sort-select select {
+  padding: 7px 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  background: white;
+  color: #344054;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* on wide screens the column headers sort the inbox; the select is for narrow ones */
+.inbox-sort-select {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .inbox-sort-select {
+    display: inline-flex;
+  }
+}
+
+.review-sort {
+  position: sticky;
+  /* stick to the very top of the scrolling list, covering the panel's 24px top padding,
+     so list items never show above the control while scrolling */
+  top: -24px;
+  z-index: 1;
+  justify-content: space-between;
+  margin: -24px 0 4px;
+  padding-top: 24px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eaecf0;
+  background: white;
+}
+
+.review-sort select {
+  flex: 1;
+  min-width: 0;
+}
+
+.review-sort + .review-group {
+  margin-top: 4px;
+}
+
+.review-subgroup {
+  margin-top: 8px;
+  color: #b54708;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dashboard charts: show / hide                                       */
+/* ------------------------------------------------------------------ */
+.charts-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.charts-count {
+  color: #667085;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.charts-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  background: white;
+}
+
+.charts-all {
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.chart-panel {
+  position: relative;
+}
+
+.chart-hide {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: #98a2b3;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chart-hide:hover {
+  border-color: #e4e7ec;
+  background: #f8fafc;
+  color: #344054;
+}
+
+.chart-hide:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 1px;
+}
+
+/* an odd chart out takes the full row instead of leaving a gap */
+.charts-grid > .chart-panel:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 520px) {
+  .charts-all {
+    margin-left: 0;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Review: the open case was resolved by someone else                  */
+/* ------------------------------------------------------------------ */
+.review-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.review-stale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border: 1px solid #fedf89;
+  border-radius: 12px;
+  background: #fffcf5;
+  color: #93370d;
+  font-size: 14px;
+}

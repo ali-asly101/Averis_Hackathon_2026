@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import "./App.css";
 import cargoSenseLogo from "./assets/logo.png";
 import { batchSummary, useTasks } from "./tasks";
@@ -39,6 +40,12 @@ type Page =
   | "comparison"
   | "review"
   | "check";
+
+// A count from the API as a safe number: missing, negative or not a number -> 0.
+function count(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -217,6 +224,9 @@ function App() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [emails, setEmails] = useState<EmailRow[]>([]);
   const [run, setRun] = useState<RunStatus | null>(null);
+  // when the next full run is allowed (ms timestamp; 0 = now). Always derived from
+  // the server's own cooldown, so every page, tab and reload agrees on it.
+  const [cooldownUntil, setCooldownUntil] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>("All");
   // Upload & Check state lives here, so leaving the page never loses it
@@ -224,17 +234,25 @@ function App() {
   const [batchFiles, setBatchFiles] = useState<File[]>([]);
   const [singleDraft, setSingleDraft] = useState<SingleDraft>(EMPTY_DRAFT);
 
+  const applyRun = useCallback((r: RunStatus) => {
+    setRun(r);
+    const remaining = count(r.cooldown?.remaining);
+    const next = remaining > 0 ? Date.now() + remaining * 1000 : 0;
+    // the server rounds to whole seconds: ignore tiny differences so the timer never jumps
+    setCooldownUntil((prev) => (Math.abs(prev - next) <= 2000 ? prev : next));
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const [s, e, r] = await Promise.all([api.summary(), api.emails(), api.runStatus()]);
       setSummary(s);
       setEmails(e);
-      setRun(r);
+      applyRun(r);
       setError(null);
     } catch (err) {
       setError(`Cannot reach the backend: ${errorText(err)}`);
     }
-  }, []);
+  }, [applyRun]);
 
   const store = useTasks(refresh);
   const { tasks, trackRun, dismiss } = store;
@@ -243,6 +261,31 @@ function App() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
   }, [refresh]);
+
+  // While the dashboard is open, check now and then for what other people did: a run (and
+  // its cooldown) someone else started, review decisions, uploads. The run status is cheap
+  // and always applied; the full data is only reloaded when the server's numbers changed.
+  // Also checked straight away when you come back to the dashboard. Errors: next time.
+  const summaryRef = useRef(summary);
+  useEffect(() => {
+    summaryRef.current = summary;
+  }, [summary]);
+  useEffect(() => {
+    if (page !== "dashboard") return;
+    const tick = async () => {
+      try {
+        const [s, r] = await Promise.all([api.summary(), api.runStatus()]);
+        applyRun(r);
+        const shown = summaryRef.current;
+        if (shown !== null && JSON.stringify(s) !== JSON.stringify(shown)) refresh();
+      } catch {
+        /* server busy or unreachable: try again on the next tick */
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 15000);
+    return () => clearInterval(timer);
+  }, [page, applyRun, refresh]);
 
   // a full run that's already going (started elsewhere, or before a reload) shows up as a task
   const runTracked = tasks.some((t) => t.kind === "run" && t.state === "running");
@@ -275,7 +318,7 @@ function App() {
 
   const startRun = async (opts: { retry?: boolean; no_ai?: boolean }) => {
     try {
-      setRun(await api.startRun(opts));
+      applyRun(await api.startRun(opts));
       trackRun(opts.retry ? "Retrying failed emails" : "Processing the provided inbox");
       setError(null);
     } catch (err) {
@@ -284,6 +327,17 @@ function App() {
         if (token) {
           adminToken.set(token);
           return startRun(opts);
+        }
+      }
+      // someone else's run is going (409) or cooling down (429): resync, so the progress bar /
+      // countdown banner explain it. If the status can't be read, show the server's message.
+      if (err instanceof ApiError && (err.status === 409 || err.status === 429)) {
+        try {
+          const r = await api.runStatus();
+          applyRun(r);
+          if (r.running || count(r.cooldown?.remaining) > 0) return setError(null);
+        } catch {
+          /* fall through to the message */
         }
       }
       setError(errorText(err));
@@ -332,6 +386,7 @@ function App() {
             emails={emails}
             run={run}
             runTask={runTask}
+            cooldownUntil={cooldownUntil}
             onRun={startRun}
             onViewInbox={openInbox}
             onOpenEmail={openEmail}
@@ -525,10 +580,12 @@ function Sidebar({
 function RunControls({
   run,
   runTask,
+  locked,
   onRun,
 }: {
   run: RunStatus | null;
   runTask: Task | undefined;
+  locked: boolean;           // cooling down: the server would refuse a new run
   onRun: (opts: { retry?: boolean; no_ai?: boolean }) => void;
 }) {
   if (runTask) {
@@ -552,10 +609,12 @@ function RunControls({
   }
   return (
     <div className="run-controls">
-      <button className="primary-button" onClick={() => onRun({})}>
+      <button className="primary-button" disabled={locked} onClick={() => onRun({})}
+              title={locked ? "Available again when the cooldown ends" : undefined}>
         Run pipeline
       </button>
-      <button className="secondary-button" onClick={() => onRun({ retry: true })}>
+      <button className="secondary-button" disabled={locked} onClick={() => onRun({ retry: true })}
+              title={locked ? "Available again when the cooldown ends" : undefined}>
         Retry failures
       </button>
       {run?.error && <span className="run-error">Last run failed: {run.error}</span>}
@@ -576,6 +635,7 @@ function Dashboard({
   emails,
   run,
   runTask,
+  cooldownUntil,
   onRun,
   onViewInbox,
   onOpenEmail,
@@ -585,6 +645,7 @@ function Dashboard({
   emails: EmailRow[];
   run: RunStatus | null;
   runTask: Task | undefined;
+  cooldownUntil: number;
   onRun: (opts: { retry?: boolean; no_ai?: boolean }) => void;
   onViewInbox: (filter?: InboxFilter) => void;
   onOpenEmail: (id: string) => void;
@@ -606,6 +667,10 @@ function Dashboard({
 
   const s = summary && summary.has_results ? summary : null;
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+  const cooldownLeft = useSecondsLeft(cooldownUntil);
+  // an admin token skips the cooldown, but only if the server has one configured: a token
+  // left in this tab after the server's was removed must not unlock the buttons
+  const hasAdminToken = adminToken.get() !== "" && run?.cooldown?.admin_bypass === true;
 
   return (
     <>
@@ -615,8 +680,17 @@ function Dashboard({
           <h2>Document Verification Dashboard</h2>
           <p className="page-subtitle">The provided inbox, processed: every email classified, every SI checked against its draft BL.</p>
         </div>
-        <RunControls run={run} runTask={runTask} onRun={onRun} />
+        <RunControls run={run} runTask={runTask} locked={cooldownLeft > 0 && !hasAdminToken} onRun={onRun} />
       </header>
+
+      {cooldownLeft > 0 && (
+        <CooldownBanner
+          secondsLeft={cooldownLeft}
+          totalSeconds={count(run?.cooldown?.seconds)}
+          until={cooldownUntil}
+          bypassed={hasAdminToken}
+        />
+      )}
 
       <WelcomeBanner onViewInbox={() => onViewInbox()} onOpenReview={onOpenReview} />
 
@@ -659,6 +733,13 @@ function Dashboard({
               description="Decided without a human"
             />
           </section>
+
+          <DashboardCharts
+            summary={s}
+            emails={emails}
+            onViewInbox={onViewInbox}
+            onOpenReview={onOpenReview}
+          />
 
           <section className="content-grid">
             <div className="panel activity-panel">
@@ -758,6 +839,328 @@ function Dashboard({
             />
           )}
         </>
+      )}
+    </>
+  );
+}
+
+// Seconds left until `until` (ms timestamp), ticking once a second; 0 when passed.
+function useSecondsLeft(until: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNow(Date.now());
+    if (until <= Date.now()) return;
+    const timer = setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (t >= until) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [until]);
+  return Math.max(0, Math.ceil((until - now) / 1000));
+}
+
+// Shown while full runs are cooling down; disappears by itself when the time is up.
+function CooldownBanner({
+  secondsLeft,
+  totalSeconds,
+  until,
+  bypassed,
+}: {
+  secondsLeft: number;
+  totalSeconds: number;
+  until: number;
+  bypassed: boolean;
+}) {
+  const total = Math.max(totalSeconds, secondsLeft, 1);
+  const at = new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return (
+    <section className="panel cooldown-banner">
+      <div className="cooldown-icon" aria-hidden="true">⏱</div>
+      <div className="cooldown-text">
+        <strong>Next run available in {secondsLeft}s</strong>
+        <span>
+          Run pipeline and Retry failures have a {totalSeconds > 0 ? `${totalSeconds}-second ` : ""}cooldown
+          between runs.
+          Available again at {at}.
+          {bypassed && " Your admin token lets you start a run anyway."}
+        </span>
+        <div className="progress cooldown-progress">
+          <div className="progress-bar" style={{ width: `${(secondsLeft / total) * 100}%` }}></div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- dashboard charts
+// Plain SVG / CSS charts (no chart library). Everything is derived from the same
+// summary + email list the dashboard already loads, so they update with every refresh.
+
+type ChartBar = { key: string; label: string; value: number; tone: string; onClick?: () => void };
+
+function BarChart({ bars, empty }: { bars: ChartBar[]; empty: string }) {
+  const max = bars.reduce((m, b) => Math.max(m, count(b.value)), 0);
+  if (max === 0) return <p className="chart-empty">{empty}</p>;
+  return (
+    <div className="bar-chart">
+      {bars.map((b) => {
+        const value = count(b.value);
+        const width = value > 0 ? Math.max(2, (value / max) * 100) : 0;
+        const content = (
+          <>
+            <span className="bar-label" title={b.label}>{b.label}</span>
+            <span className="bar-track">
+              <span className={`bar-fill tone-${b.tone}`} style={{ width: `${width}%` }}></span>
+            </span>
+            <span className="bar-value">{value}</span>
+          </>
+        );
+        return b.onClick ? (
+          <button key={b.key} className="bar-row bar-row-link" onClick={b.onClick}>
+            {content}
+          </button>
+        ) : (
+          <div key={b.key} className="bar-row">
+            {content}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+type Slice = { key: string; label: string; value: number; tone: string };
+
+function DonutChart({ slices, centerLabel, empty }: { slices: Slice[]; centerLabel: string; empty: string }) {
+  const safe = slices.map((sl) => ({ ...sl, value: count(sl.value) }));
+  const total = safe.reduce((n, sl) => n + sl.value, 0);
+  if (total === 0) return <p className="chart-empty">{empty}</p>;
+  const r = 40;
+  const circumference = 2 * Math.PI * r;
+  const starts = safe.map((_, i) => safe.slice(0, i).reduce((n, sl) => n + sl.value, 0));
+  return (
+    <div className="donut-chart">
+      <svg viewBox="0 0 100 100" className="donut" role="img"
+           aria-label={safe.map((sl) => `${sl.label}: ${sl.value}`).join(", ")}>
+        <circle cx="50" cy="50" r={r} className="donut-track" />
+        {safe.map((sl, i) =>
+          sl.value > 0 ? (
+            <circle
+              key={sl.key}
+              cx="50"
+              cy="50"
+              r={r}
+              className={`donut-slice tone-${sl.tone}`}
+              strokeDasharray={`${(sl.value / total) * circumference} ${circumference}`}
+              strokeDashoffset={-(starts[i] / total) * circumference}
+              transform="rotate(-90 50 50)"
+            />
+          ) : null,
+        )}
+        <text x="50" y="49" className="donut-total">{total}</text>
+        <text x="50" y="62" className="donut-caption">{centerLabel}</text>
+      </svg>
+      <ul className="chart-legend">
+        {safe.map((sl) => (
+          <li key={sl.key}>
+            <span className={`legend-swatch tone-${sl.tone}`}></span>
+            <span className="legend-label">{sl.label}</span>
+            <strong>{sl.value}</strong>
+            <small>{Math.round((sl.value / total) * 100)}%</small>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const CHART_IDS = ["category", "outcomes", "fields", "reasons"] as const;
+type ChartId = (typeof CHART_IDS)[number];
+const HIDDEN_CHARTS_KEY = "sdoc_hidden_charts_v1";
+
+// Which charts are hidden, remembered in this browser. Unknown or corrupt saved
+// values are ignored, so a new or renamed chart always starts visible.
+function readHiddenCharts(): ChartId[] {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(HIDDEN_CHARTS_KEY) ?? "[]");
+    return Array.isArray(saved) ? CHART_IDS.filter((id) => saved.includes(id)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function useHiddenCharts(): [ChartId[], (next: ChartId[]) => void] {
+  const [hidden, setHiddenRaw] = useState<ChartId[]>(readHiddenCharts);
+  // another tab of this browser changed it: follow along
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key === HIDDEN_CHARTS_KEY) setHiddenRaw(readHiddenCharts());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+  const setHidden = useCallback((next: ChartId[]) => {
+    const clean = CHART_IDS.filter((id) => next.includes(id));   // known ids, no duplicates
+    setHiddenRaw(clean);
+    try {
+      localStorage.setItem(HIDDEN_CHARTS_KEY, JSON.stringify(clean));
+    } catch {
+      /* private mode: the choice still works until the page is reloaded */
+    }
+  }, []);
+  return [hidden, setHidden];
+}
+
+const CATEGORY_ORDER: BackendCategory[] = ["BL_COMPARISON", "SI_REQUEST", "INVOICE_QUERY", "GENERAL", "SPAM"];
+
+function DashboardCharts({
+  summary: s,
+  emails,
+  onViewInbox,
+  onOpenReview,
+}: {
+  summary: Extract<Summary, { has_results: true }>;
+  emails: EmailRow[];
+  onViewInbox: (filter?: InboxFilter) => void;
+  onOpenReview: () => void;
+}) {
+  const [hidden, setHidden] = useHiddenCharts();
+  const [editing, setEditing] = useState(false);
+
+  // same scope as the numbers above: the provided inbox, not uploads
+  const dataset = useMemo(() => emails.filter((e) => e.source !== "upload"), [emails]);
+
+  // known categories in their usual order, plus any new one the backend reports
+  const categories: Record<string, unknown> = s.categories ?? {};
+  const categoryBars: ChartBar[] = [
+    ...CATEGORY_ORDER,
+    ...Object.keys(categories).filter((c) => !CATEGORY_ORDER.includes(c as BackendCategory)),
+  ].map((c) => {
+    const label = CATEGORY_LABEL[c as BackendCategory] ?? fieldLabel(c.toLowerCase());
+    const known = c in CATEGORY_LABEL;
+    return {
+      key: c,
+      label,
+      value: count(categories[c]),
+      tone: `cat-${c.toLowerCase().replace(/_/g, "-")}`,
+      onClick: known ? () => onViewInbox(label as Category) : undefined,
+    };
+  });
+
+  const ok = count(s.no_mismatch);
+  const mismatches = count(s.mismatches);
+  const inReview = Math.max(0, count(s.comparisons) - ok - mismatches);
+  const outcomeSlices: Slice[] = [
+    { key: "ok", label: "No mismatch", value: ok, tone: "verified" },
+    { key: "mismatch", label: "Mismatch", value: mismatches, tone: "mismatch" },
+    // status still NEEDS_REVIEW, including cases acknowledged with "request new documents",
+    // so this can be higher than the Human Review card (open cases only)
+    { key: "review", label: "Escalated", value: inReview, tone: "review" },
+  ];
+
+  const fieldBars = useMemo<ChartBar[]>(() => {
+    const counts: Record<string, number> = {};
+    for (const e of dataset) {
+      if (e.category !== "BL_COMPARISON" || e.status !== "MISMATCH") continue;
+      for (const f of e.defect_fields ?? []) {
+        if (typeof f === "string" && f) counts[f] = (counts[f] ?? 0) + 1;
+      }
+    }
+    const fields = [...FIELD_ORDER, ...Object.keys(counts).filter((f) => !FIELD_ORDER.includes(f))];
+    return fields.map((f) => ({ key: f, label: fieldLabel(f), value: counts[f] ?? 0, tone: "mismatch" }));
+  }, [dataset]);
+
+  const reasonBars = useMemo<ChartBar[]>(() => {
+    const counts = new Map<string, number>();
+    for (const e of dataset) {
+      if (!e.needs_review) continue;
+      const reason = typeof e.review_reason === "string" ? e.review_reason : "";
+      counts.set(reason, (counts.get(reason) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([reason, value]) => ({
+        key: reason || "category",
+        label: reason ? (REVIEW_REASON_LABEL[reason] ?? fieldLabel(reason)) : "Category to confirm",
+        value,
+        tone: "review",
+        onClick: onOpenReview,
+      }));
+  }, [dataset, onOpenReview]);
+
+  const charts: { id: ChartId; eyebrow: string; title: string; body: ReactNode }[] = [
+    { id: "category", eyebrow: "Classification", title: "Emails by category",
+      body: <BarChart bars={categoryBars} empty="No emails processed yet." /> },
+    { id: "outcomes", eyebrow: "SI ↔ BL checks", title: "Document check outcomes",
+      body: <DonutChart slices={outcomeSlices} centerLabel="checks" empty="No document-check requests yet." /> },
+    { id: "fields", eyebrow: "Discrepancies", title: "Mismatches by field",
+      body: <BarChart bars={fieldBars} empty="No mismatches found: every checked field agrees." /> },
+    { id: "reasons", eyebrow: "Human review", title: "Open cases by reason",
+      body: <BarChart bars={reasonBars} empty="Nothing waiting for review." /> },
+  ];
+  const visible = charts.filter((c) => !hidden.includes(c.id));
+
+  return (
+    <>
+      <div className="charts-toolbar">
+        <span className="charts-count">
+          {visible.length === charts.length
+            ? "Charts"
+            : visible.length
+              ? `Showing ${visible.length} of ${charts.length} charts`
+              : "All charts hidden"}
+        </span>
+        <button
+          className="secondary-button"
+          aria-expanded={editing}
+          onClick={() => setEditing((v) => !v)}
+        >
+          {editing ? "Done" : "Edit charts"}
+        </button>
+      </div>
+
+      {editing && (
+        <div className="charts-editor">
+          {charts.map((c) => {
+            const shown = !hidden.includes(c.id);
+            return (
+              <button
+                key={c.id}
+                className={`filter-button ${shown ? "active-filter" : ""}`}
+                aria-pressed={shown}
+                onClick={() => setHidden(shown ? [...hidden, c.id] : hidden.filter((h) => h !== c.id))}
+              >
+                {shown ? "✓ " : "+ "}
+                {c.title}
+              </button>
+            );
+          })}
+          <button className="link-button charts-all" onClick={() => setHidden(hidden.length ? [] : [...CHART_IDS])}>
+            {hidden.length ? "Show all" : "Hide all"}
+          </button>
+        </div>
+      )}
+
+      {visible.length > 0 && (
+        <section className="charts-grid">
+          {visible.map((c) => (
+            <div className="panel chart-panel" key={c.id}>
+              <button
+                className="chart-hide"
+                title="Hide this chart"
+                aria-label={`Hide ${c.title}`}
+                onClick={() => setHidden([...hidden, c.id])}
+              >
+                ✕
+              </button>
+              <p className="eyebrow">{c.eyebrow}</p>
+              <h3>{c.title}</h3>
+              {c.body}
+            </div>
+          ))}
+        </section>
       )}
     </>
   );
@@ -882,6 +1285,75 @@ function UploadsPanel({
   );
 }
 
+// ---------------------------------------------------------------- sorting (display only)
+// Sorting only reorders what's already loaded; filters, search, counts and the data
+// itself are untouched. The choice is kept for this browser tab (sessionStorage).
+
+function loadChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  try {
+    const v = sessionStorage.getItem(key);
+    return v !== null && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveChoice(key: string, value: string) {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    /* private mode: the choice still works until the page is left */
+  }
+}
+
+// natural order: "email_2" before "email_10", case-insensitive
+const byText = (a: string, b: string) =>
+  String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+
+// Stable sort: equal items keep the server's order.
+function sortedBy<T>(items: T[], compare: (a: T, b: T) => number, desc = false): T[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => (desc ? -1 : 1) * compare(a.item, b.item) || a.index - b.index)
+    .map((x) => x.item);
+}
+
+// most urgent first when ascending
+const STATUS_ORDER: Status[] = ["Needs Review", "Mismatch", "Verified", "Classified"];
+const rank = <T,>(order: readonly T[], value: T) => {
+  const i = order.indexOf(value);
+  return i === -1 ? order.length : i;
+};
+
+type InboxSortKey = "email" | "category" | "status" | "basis" | "documents";
+const INBOX_SORT_STORE = "sdoc_inbox_sort_v1";
+// "default" = the server's order (newest uploads first, then the inbox)
+const INBOX_SORTS = [
+  "default",
+  "email:asc", "email:desc", "category:asc", "category:desc", "status:asc", "status:desc",
+  "basis:asc", "basis:desc", "documents:asc", "documents:desc",
+] as const;
+type InboxSort = (typeof INBOX_SORTS)[number];
+
+const INBOX_COLUMNS: { key: InboxSortKey; label: string; asc: string; desc: string }[] = [
+  { key: "email", label: "Email", asc: "Subject A–Z", desc: "Subject Z–A" },
+  { key: "category", label: "Category", asc: "Category", desc: "Category (reversed)" },
+  { key: "status", label: "Status", asc: "Status: needs review first", desc: "Status: classified first" },
+  { key: "basis", label: "Verified by", asc: "Verified by A–Z", desc: "Verified by Z–A" },
+  { key: "documents", label: "Documents", asc: "Documents: fewest first", desc: "Documents: most first" },
+];
+
+const INBOX_COMPARE: Record<InboxSortKey, (a: EmailRow, b: EmailRow) => number> = {
+  email: (a, b) => byText(a.subject ?? "", b.subject ?? "") || byText(a.original_id ?? a.id, b.original_id ?? b.id),
+  category: (a, b) => rank(CATEGORY_ORDER, a.category) - rank(CATEGORY_ORDER, b.category),
+  status: (a, b) =>
+    rank(STATUS_ORDER, statusLabel(a.category, a.status)) - rank(STATUS_ORDER, statusLabel(b.category, b.status)),
+  basis: (a, b) => byText(a.basis?.label ?? "", b.basis?.label ?? ""),
+  documents: (a, b) =>
+    count(a.attachments) - count(b.attachments) ||
+    byText((a.attachment_types ?? []).join("+"), (b.attachment_types ?? []).join("+")),
+};
+
 function Inbox({
   emails,
   initialFilter = "All",
@@ -896,6 +1368,15 @@ function Inbox({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<InboxFilter>(initialFilter);
   const [notice, setNotice] = useState<string | null>(null);
+  const [sort, setSortRaw] = useState<InboxSort>(() => loadChoice(INBOX_SORT_STORE, INBOX_SORTS, "default"));
+  const setSort = (next: InboxSort) => {
+    setSortRaw(next);
+    saveChoice(INBOX_SORT_STORE, next);
+  };
+  const [sortKey, sortDir] = sort === "default" ? [null, null] : (sort.split(":") as [InboxSortKey, "asc" | "desc"]);
+  // header click: ascending -> descending -> back to the default order
+  const toggleSort = (key: InboxSortKey) =>
+    setSort(sortKey !== key ? `${key}:asc` : sortDir === "asc" ? `${key}:desc` : "default");
   const uploadedCount = emails.filter((e) => e.source === "upload").length;
 
   const removeOne = async (email: EmailRow) => {
@@ -935,6 +1416,11 @@ function Inbox({
       return matchesSearch && matchesFilter;
     });
   }, [emails, search, filter]);
+
+  const visibleEmails = useMemo(
+    () => (sortKey ? sortedBy(filteredEmails, INBOX_COMPARE[sortKey], sortDir === "desc") : filteredEmails),
+    [filteredEmails, sortKey, sortDir],
+  );
 
   const filters: InboxFilter[] = [
     "All",
@@ -977,6 +1463,16 @@ function Inbox({
               onChange={(event) => setSearch(event.target.value)}
             />
           </div>
+          <label className="sort-select inbox-sort-select">
+            <span>Sort</span>
+            <select value={sort} onChange={(e) => setSort(e.target.value as InboxSort)}>
+              <option value="default">Default order</option>
+              {INBOX_COLUMNS.flatMap((c) => [
+                <option key={`${c.key}:asc`} value={`${c.key}:asc`}>{c.asc}</option>,
+                <option key={`${c.key}:desc`} value={`${c.key}:desc`}>{c.desc}</option>,
+              ])}
+            </select>
+          </label>
           <span className="result-count">{filteredEmails.length} results</span>
           {uploadedCount > 0 && (
             <button className="secondary-button danger-button" onClick={removeAll}>
@@ -1000,14 +1496,28 @@ function Inbox({
 
         <div className="inbox-table">
           <div className="inbox-table-header">
-            <span>Email</span>
-            <span>Category</span>
-            <span>Status</span>
-            <span>Verified by</span>
-            <span>Documents</span>
+            {INBOX_COLUMNS.map((c) => {
+              const active = sortKey === c.key;
+              return (
+                <span key={c.key} role="columnheader"
+                      aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                  <button
+                    type="button"
+                    className={`sort-header ${active ? "sort-active" : ""}`}
+                    title={active ? (sortDir === "asc" ? c.asc : c.desc) : `Sort by ${c.label.toLowerCase()}`}
+                    onClick={() => toggleSort(c.key)}
+                  >
+                    {c.label}
+                    <span className="sort-arrow" aria-hidden="true">
+                      {active ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
+                    </span>
+                  </button>
+                </span>
+              );
+            })}
           </div>
 
-          {filteredEmails.map((email) => {
+          {visibleEmails.map((email) => {
             return (
               <div
                 role="button"
@@ -1875,6 +2385,37 @@ const FIELD_ORDER = [
   "gross_weight_kg",
 ];
 
+// Review queue sorting. Always within each group (provided inbox, then your uploads),
+// so the two groups stay apart exactly as before.
+const REVIEW_SORT_STORE = "sdoc_review_sort_v1";
+const REVIEW_SORTS = ["recommended", "id:asc", "id:desc", "reason"] as const;
+type ReviewSort = (typeof REVIEW_SORTS)[number];
+const REVIEW_SORT_LABEL: Record<ReviewSort, string> = {
+  recommended: "Proposal first",
+  "id:asc": "Email A–Z",
+  "id:desc": "Email Z–A",
+  reason: "By reason",
+};
+
+function reviewTitle(q: QueueItem): string {
+  return q.original_id ?? (q.source === "upload" ? q.subject || "Your upload" : q.email_id);
+}
+
+function reviewReasonLabel(q: QueueItem): string {
+  return REVIEW_REASON_LABEL[q.review_reason ?? ""] ?? "Category to confirm";
+}
+
+function sortQueue(queue: QueueItem[], sort: ReviewSort): QueueItem[] {
+  if (sort === "recommended") return queue;   // the server's order: proposals ready first
+  const group = (q: QueueItem) => (q.source === "upload" ? 1 : 0);
+  const byTitle = (a: QueueItem, b: QueueItem) => byText(reviewTitle(a), reviewTitle(b));
+  const inGroup = (a: QueueItem, b: QueueItem) => group(a) - group(b);
+  if (sort === "reason")
+    return sortedBy(queue, (a, b) => inGroup(a, b) || byText(reviewReasonLabel(a), reviewReasonLabel(b)) || byTitle(a, b));
+  const dir = sort === "id:desc" ? -1 : 1;
+  return sortedBy(queue, (a, b) => inGroup(a, b) || dir * byTitle(a, b));
+}
+
 function HumanReview({
   initialId,
   onChanged,
@@ -1886,6 +2427,17 @@ function HumanReview({
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resolved, setResolved] = useState<EmailDetail | null>(null);
+  const [sort, setSortRaw] = useState<ReviewSort>(() => loadChoice(REVIEW_SORT_STORE, REVIEW_SORTS, "recommended"));
+  const setSort = (next: ReviewSort) => {
+    setSortRaw(next);
+    saveChoice(REVIEW_SORT_STORE, next);
+  };
+  const sorted = useMemo(() => sortQueue(queue, sort), [queue, sort]);
+  const sortRef = useRef(sort);
+  useEffect(() => {
+    sortRef.current = sort;
+  }, [sort]);
+  const firstOf = (q: QueueItem[]) => sortQueue(q, sortRef.current)[0]?.email_id ?? null;
 
   const loadQueue = useCallback(async () => {
     try {
@@ -1896,7 +2448,7 @@ function HumanReview({
           ? cur
           : initialId && q.some((i) => i.email_id === initialId)
             ? initialId
-            : (q[0]?.email_id ?? null),
+            : firstOf(q),
       );
     } catch (err) {
       setError(errorText(err));
@@ -1907,6 +2459,27 @@ function HumanReview({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadQueue();
   }, [loadQueue]);
+
+  // Other reviewers work on the same queue: refresh the list now and then. The case you
+  // have open is never switched out from under you (see the notice below instead).
+  useEffect(() => {
+    const timer = setInterval(() => {
+      api.queue()
+        .then((q) => {
+          setQueue(q);
+          setSelected((cur) => cur ?? firstOf(q));
+        })
+        .catch(() => {
+          /* try again next time */
+        });
+    }, 15000);
+    return () => clearInterval(timer);
+    // firstOf only reads a ref
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // the open case left the queue without you deciding it: someone else resolved it
+  const selectedGone = selected !== null && !queue.some((q) => q.email_id === selected);
 
   const uploadedCount = queue.filter((q) => q.source === "upload").length;
 
@@ -1969,7 +2542,7 @@ function HumanReview({
 
       {error && <div className="api-error">{error}</div>}
 
-      {queue.length === 0 ? (
+      {queue.length === 0 && !selected ? (
         <section className="panel empty-state">
           <strong>Nothing to review</strong>
           <span>Every case has been decided.</span>
@@ -1977,10 +2550,24 @@ function HumanReview({
       ) : (
         <section className="review-shell">
           <div className="panel review-list">
-            {queue.map((q, i) => (
+            <label className="sort-select review-sort">
+              <span>Sort</span>
+              <select value={sort} onChange={(e) => setSort(e.target.value as ReviewSort)}>
+                {REVIEW_SORTS.map((o) => (
+                  <option key={o} value={o}>{REVIEW_SORT_LABEL[o]}</option>
+                ))}
+              </select>
+            </label>
+            {sorted.map((q, i) => {
+              const prev = i > 0 ? sorted[i - 1] : null;
+              const newGroup = !prev || (q.source === "upload") !== (prev.source === "upload");
+              return (
               <Fragment key={q.email_id}>
-              {(i === 0 || (q.source === "upload") !== (queue[i - 1].source === "upload")) && uploadedCount > 0 && (
+              {newGroup && uploadedCount > 0 && (
                 <p className="review-group">{q.source === "upload" ? "Your uploads" : "Provided inbox"}</p>
+              )}
+              {sort === "reason" && (newGroup || reviewReasonLabel(q) !== reviewReasonLabel(prev!)) && (
+                <p className="review-group review-subgroup">{reviewReasonLabel(q)}</p>
               )}
               <button
                 key={q.email_id}
@@ -1988,10 +2575,10 @@ function HumanReview({
                 onClick={() => setSelected(q.email_id)}
               >
                 <strong title={q.email_id}>
-                  {q.original_id ?? (q.source === "upload" ? q.subject || "Your upload" : q.email_id)}
+                  {reviewTitle(q)}
                 </strong>
                 <span>
-                  {REVIEW_REASON_LABEL[q.review_reason ?? ""] ?? "Category to confirm"}
+                  {reviewReasonLabel(q)}
                 </span>
                 {q.source === "upload" && <em className="upload-tag">Uploaded</em>}
                 {q.proposed && q.proposed !== "INCOMPLETE" && (
@@ -1999,17 +2586,32 @@ function HumanReview({
                 )}
               </button>
               </Fragment>
-            ))}
+              );
+            })}
           </div>
           {selected && (
-            <ReviewCase
-              key={selected}
-              emailId={selected}
-              onResolved={(d) => {
-                setResolved(d);
-                onChanged();
-              }}
-            />
+            <div className="review-main">
+              {selectedGone && (
+                <div className="review-stale" role="status">
+                  <span>
+                    <strong>Another reviewer has already resolved this case.</strong> If you save
+                    now, your decision replaces theirs.
+                  </span>
+                  <button className="secondary-button" onClick={() => setSelected(firstOf(queue))}>
+                    {queue.length ? "Go to next open case" : "Back to the queue"}
+                  </button>
+                </div>
+              )}
+              <ReviewCase
+                key={selected}
+                emailId={selected}
+                onResolved={(d) => {
+                  setSelected(null);   // your own decision: not "resolved by someone else"
+                  setResolved(d);
+                  onChanged();
+                }}
+              />
+            </div>
           )}
         </section>
       )}
@@ -2374,7 +2976,9 @@ function CategoryBadge({
 }: {
   category: Category;
 }) {
-  const className = category
+  // a category this UI doesn't know yet shows as plain text instead of breaking the page
+  const label: string = category ?? "Other";
+  const className = label
     .toLowerCase()
     .replaceAll(" ", "-");
 
@@ -2382,7 +2986,7 @@ function CategoryBadge({
     <span
       className={`category-badge ${className}`}
     >
-      {category}
+      {label}
     </span>
   );
 }

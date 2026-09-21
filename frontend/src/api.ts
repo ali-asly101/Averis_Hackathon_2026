@@ -149,6 +149,10 @@ export type RunStatus = {
   mode: string | null;
   summary: { emails: number; retryable_failures: number } | null;
   activity?: Activity | null;
+  // minimum gap between full runs (server setting) and seconds left before the next one;
+  // admin_bypass: whether the server accepts an admin token to skip it at all.
+  // Optional so an older backend without it still works (no cooldown / no bypass shown)
+  cooldown?: { seconds: number; remaining: number; admin_bypass?: boolean } | null;
 };
 
 export type Decision = {
@@ -248,9 +252,22 @@ export type BatchStatus = {
 
 // Admin token for starting full runs on a protected deploy (asked once, kept for the tab)
 const TOKEN_KEY = "sdoc_admin_token";
+// (storage can be blocked, e.g. some private modes: then there's simply no saved token)
 export const adminToken = {
-  get: () => sessionStorage.getItem(TOKEN_KEY) ?? "",
-  set: (t: string) => sessionStorage.setItem(TOKEN_KEY, t),
+  get: () => {
+    try {
+      return sessionStorage.getItem(TOKEN_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  },
+  set: (t: string) => {
+    try {
+      sessionStorage.setItem(TOKEN_KEY, t);
+    } catch {
+      /* not kept: the token will be asked for again next time */
+    }
+  },
 };
 
 export class ApiError extends Error {

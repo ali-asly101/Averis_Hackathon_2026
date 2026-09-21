@@ -15,7 +15,7 @@ Endpoints:
   GET  /api/review                      human review queue
   POST /api/review/{id}                 confirm / correct / override / reopen
   POST /api/run                         start a pipeline run (background)
-  GET  /api/run                         run progress / last result
+  GET  /api/run                         run progress / last result / run cooldown
   POST /api/check                       Upload & Check: run one email + SI/BL files
   POST /api/batch                       Upload & Check: a whole inbox (zip / .json / .eml + files)
   GET  /api/batch/{id}                  batch progress + results
@@ -446,6 +446,16 @@ def _start_run(req: RunRequest):
     threading.Thread(target=_do_run, args=(req,), daemon=True).start()
 
 
+def _cooldown():
+    """Read-only view of the full-run cooldown (the same numbers start_run
+    enforces), so the UI can show when the next run is allowed."""
+    seconds = config.run_cooldown_seconds()
+    wait = seconds - (time.time() - _last_run_started)
+    return {"seconds": seconds, "remaining": int(wait) + 1 if wait > 0 else 0,
+            # only whether a token is configured (never the token itself)
+            "admin_bypass": bool(config.admin_token())}
+
+
 @app.post("/api/run")
 def start_run(req: RunRequest, x_admin_token: Optional[str] = Header(default=None)):
     token = config.admin_token()
@@ -457,7 +467,7 @@ def start_run(req: RunRequest, x_admin_token: Optional[str] = Header(default=Non
     if wait > 0 and not (token and x_admin_token == token):
         raise HTTPException(429, f"A run was started recently - try again in {int(wait) + 1}s")
     _start_run(req)
-    return _run
+    return {**_run, "cooldown": _cooldown()}
 
 
 @app.post("/api/check")
@@ -519,7 +529,7 @@ async def check_upload(
 
 @app.get("/api/run")
 def run_status():
-    return {**_run, "activity": activity.job("run")}
+    return {**_run, "activity": activity.job("run"), "cooldown": _cooldown()}
 
 
 def _slow_email(email):
